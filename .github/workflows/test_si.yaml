@@ -1,140 +1,84 @@
-name: Test Si example0 and Release
+name: Test Si example
 
 on:
   push:
     branches:
       - develop
-  release:
-    types: [published]
-
-env:
-  CONDA_ENV_NAME: alamode
-  CONDA_ENV_FILE: etc/alamode-environment.yml
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest]
         python-version: ['3.10']
-    name: OS ${{ matrix.os }} Python ${{ matrix.python-version }}
+    name: OS ${{ matrix.os }} Python ${{ matrix.python-version }} 
     defaults:
       run:
         shell: bash -l {0}
-    
     steps:
       - uses: actions/checkout@v4
-      
       - name: Setup Miniforge
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
-          activate-environment: ${{ env.CONDA_ENV_NAME }}
+          activate-environment: alamode
           python-version: ${{ matrix.python-version }}
-          auto-activate-base: false
-          
-      - name: Get current date
-        id: date
-        run: echo "date=$(date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
+     
+      - name: Get Date
+        id: get-date
+        run: echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
+        shell: bash
         
-      - name: Cache conda environment
+      - name: Cache Conda env
         uses: actions/cache@v4
+        env:
+          CACHE_NUMBER: 0
         with:
-          path: $CONDA/envs
-          key: conda-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.date.outputs.date }}-${{ hashFiles(env.CONDA_ENV_FILE) }}
-          restore-keys: |
-            conda-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.date.outputs.date }}-
-            conda-${{ runner.os }}-${{ matrix.python-version }}-
-            
+          path: ${{ env.CONDA }}/envs
+          key: conda-${{ runner.os }}--${{ runner.arch }}--${{ steps.get-date.outputs.today }}-${{ hashFiles('etc/alamode-environment.yml') }}-${{ env.CACHE_NUMBER }}
+        id: cache
+         
       - name: Update environment
-        run: |
-          conda env update -n $CONDA_ENV_NAME -f $CONDA_ENV_FILE
-          conda activate $CONDA_ENV_NAME
-          
-      - name: Install required conda packages
-        run: |
-          conda install -y numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
-          
-      - name: Show environment info
-        run: |
+        run: conda env update -n alamode -f etc/alamode-environment.yml
+        if: steps.cache.outputs.cache-hit != 'true'
+        
+      - run: |
           conda info
           conda list
+          conda config --show-sources
           conda config --show
-          which cmake
-          echo "CC: $CC"
-          echo "CXX: $CXX"
+          printenv | sort
           
-      - name: Configure and build with CMake
+      - name: Install conda libraries
+        run: conda install numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
+        
+      - run: echo ${CC} ${CXX}
+
+      - name: Fix and Build with cmake
         run: |
+          # 临时修复：设置环境变量
           export CMAKE_POLICY_VERSION_MINIMUM=3.5
-          mkdir -p build
-          cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_DEFAULT_CMP0091=NEW ..
-          make -j$(nproc)
-          
-      - name: Run Si test
+          mkdir -p _build
+          cd _build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          make -j
+          cd ..
+      
+      - name: Run test Si
+        working-directory: ./test
+        run: python test_si.py
+        
+      - name: Compress _build directory
         run: |
-          cd test
-          python test_si.py
-          
-      - name: List build directory contents
-        run: |
-          echo "=== Root directory ==="
-          ls -la
-          echo "=== Build directory ==="
-          ls -la build/
-          echo "=== Test directory ==="
-          ls -la test/
-          
-      - name: Compress build directory
-        if: github.event_name == 'release'
-        run: |
-          tar -czf build-${{ github.sha }}.tar.gz build/
-          ls -la *.tar.gz
+          # 压缩_build目录
+          tar -czf build-artifacts.tar.gz _build/
+          # 显示压缩文件信息
+          ls -lh build-artifacts.tar.gz
           
       - name: Upload build artifacts
-        if: github.event_name == 'release'
         uses: actions/upload-artifact@v4
         with:
-          name: alamode-build-${{ github.sha }}
-          path: |
-            build-${{ github.sha }}.tar.gz
-            test/
+          name: build-artifacts
+          path: build-artifacts.tar.gz
           retention-days: 30
-
-  create-release:
-    if: github.event_name == 'release'
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    name: Create Release Assets
-    
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: alamode-build-${{ github.sha }}
-          
-      - name: List downloaded files
-        run: ls -la
-          
-      - name: Create release assets package
-        run: |
-          # 解压构建目录
-          tar -xzf build-${{ github.sha }}.tar.gz
-          # 重命名目录
-          mv build alamode-build
-          mv test alamode-test
-          # 重新打包为发布资源
-          tar -czf alamode-binaries-${{ github.sha }}.tar.gz alamode-build/ alamode-test/
-          ls -la
-          
-      - name: Upload release assets
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./alamode-binaries-${{ github.sha }}.tar.gz
-          asset_name: alamode-binaries-${{ github.event.release.tag_name }}.tar.gz
-          asset_content_type: application/gzip
