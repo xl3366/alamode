@@ -29,15 +29,6 @@ jobs:
         id: get-date
         run: echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
         shell: bash
-        
-      - name: Cache Conda env
-        uses: actions/cache@v4
-        env:
-          CACHE_NUMBER: 0
-        with:
-          path: ${{ env.CONDA }}/envs
-          key: conda-${{ runner.os }}--${{ runner.arch }}--${{ steps.get-date.outputs.today }}-${{ hashFiles('etc/alamode-environment.yml') }}-${{ env.CACHE_NUMBER }}
-        id: cache
          
       - name: Update environment
         run: conda env update -n alamode -f etc/alamode-environment.yml
