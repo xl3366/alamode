@@ -74,9 +74,18 @@ jobs:
           make -j$(nproc)
           
       - name: Run Si test
-        working-directory: ./test
         run: |
+          cd test
           python test_si.py
+          
+      - name: List build directory contents
+        run: |
+          echo "=== Root directory ==="
+          ls -la
+          echo "=== Build directory ==="
+          ls -la _build/
+          echo "=== Test directory ==="
+          ls -la test/
           
       - name: Upload build artifacts
         if: github.event_name == 'release'
@@ -85,7 +94,7 @@ jobs:
           name: alamode-build-${{ github.sha }}
           path: |
             _build/
-            !_build/CMakeFiles/
+            test/
           retention-days: 30
 
   create-release:
@@ -99,16 +108,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: alamode-build-${{ github.sha }}
-          path: downloaded-artifacts
           
       - name: List downloaded files
-        run: ls -la downloaded-artifacts/
-        
+        run: ls -la
+          
       - name: Create release assets package
         run: |
-          mkdir -p release-assets
-          cp -r downloaded-artifacts/_build/* release-assets/ || true
-          tar -czf alamode-binaries-${{ github.sha }}.tar.gz release-assets/
+          # 重命名目录以避免路径混乱
+          mv _build alamode-build
+          mv test alamode-test
+          tar -czf alamode-binaries-${{ github.sha }}.tar.gz alamode-build/ alamode-test/
           ls -la
           
       - name: Upload release assets
@@ -118,27 +127,5 @@ jobs:
         with:
           upload_url: ${{ github.event.release.upload_url }}
           asset_path: ./alamode-binaries-${{ github.sha }}.tar.gz
-          asset_name: alamode-binaries-${{ github.sha }}.tar.gz
+          asset_name: alamode-binaries-${{ github.event.release.tag_name }}.tar.gz
           asset_content_type: application/gzip
-
-  auto-release:
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    name: Auto Create Release on Success
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        if: success()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: auto-release-${{ github.sha }}
-          release_name: Auto Release ${{ github.sha }}
-          draft: false
-          prerelease: true
-          generate_release_notes: true
