@@ -8,7 +8,7 @@ dependencies:
   - scipy
   - h5py
   - compilers
-  - spglib
+  - spglib=2.3.1
   - boost
   - eigen
-  - cmake
+  - cmake=3.1
