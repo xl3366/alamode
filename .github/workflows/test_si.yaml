@@ -51,7 +51,7 @@ jobs:
           printenv | sort
           
       - name: Install conda libraries
-        run: conda install numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
+        run: conda install numpy scipy h5py compilers spglib=1.16.0 boost eigen cmake openmpi fftw
         
       - run: echo ${CC} ${CXX}
 
