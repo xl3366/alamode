@@ -1,29 +1,27 @@
-name: Test Si example
+name: Build and Release ALAMODE
 
 on:
+  workflow_dispatch:  # 手动触发
   push:
     branches:
-      - 2.0dev
-    # paths:
-    #   - '**.cpp'
-    #   - '**.h'
-    #   - '**.py'
-    #   - '**.c'
-  
+      - develop     # 改为 develop 分支
+
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  build-and-release:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, macOS-latest]
-#        os: [ubuntu-latest, windows-latest, macOS-latest]
         python-version: ['3.10']
-    name: OS ${{ matrix.os }} Python ${{ matrix.python-version }} 
+    name: Ubuntu Python ${{ matrix.python-version }}
     defaults:
       run:
         shell: bash -l {0}
+    
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
       - name: Setup Miniforge
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -31,35 +29,38 @@ jobs:
           activate-environment: alamode
           python-version: ${{ matrix.python-version }}
      
-      - name: Get Date
-        id: get-date
-        run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
-        shell: bash
-        
+      - name: Get Version Info
+        id: version
+        run: |
+          # 从代码中获取版本号或使用日期作为版本
+          if [ -f "VERSION" ]; then
+            VERSION=$(cat VERSION)
+          elif [ -f "setup.py" ]; then
+            VERSION=$(grep -oP "version=['\"]\K[^'\"]+" setup.py | head -1)
+          else
+            VERSION=$(date -u '+%Y.%m.%d')
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG_NAME=v$VERSION-$(/bin/date -u '+%Y%m%d')" >> $GITHUB_ENV
+          echo "RELEASE_NAME=ALAMODE $VERSION (Ubuntu)" >> $GITHUB_ENV
+          echo "DATE=$(/bin/date -u '+%Y-%m-%d')" >> $GITHUB_ENV
+      
       - name: Cache Conda env
         uses: actions/cache@v4
         env:
-          # Increase this value to reset cache if etc/alm-environment.yml has not changed
           CACHE_NUMBER: 0
         with:
           path: ${{ env.CONDA }}/envs
-          key: conda-${{ runner.os }}--${{ runner.arch }}--${{ steps.get-date.outputs.today }}-${{ hashFiles('etc/alamode-environment.yml') }}-${{ env.CACHE_NUMBER }}
+          key: conda-${{ runner.os }}--${{ runner.arch }}--${{ env.TAG_NAME }}-${{ hashFiles('etc/alamode-environment.yml') }}-${{ env.CACHE_NUMBER }}
         id: cache
          
       - name: Update environment
-        run: conda env update -n anaconda-client-env -f etc/alamode-environment.yml
+        run: conda env update -n alamode -f etc/alamode-environment.yml
         if: steps.cache.outputs.cache-hit != 'true'
-      - run: |
-          conda info
-          conda list
-          conda config --show-sources
-          conda config --show
-          printenv | sort
+      
       - name: Install conda libraries
         run: conda install numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
-        
-      - run: echo ${CC} ${CXX}
-
+      
       - name: Build alm and anphon with cmake
         run: |
           mkdir -p _build
@@ -71,3 +72,38 @@ jobs:
       - name: Run test Si
         working-directory: ./test
         run: python test_si.py
+      
+      - name: Create binary archive
+        run: |
+          mkdir -p dist
+          # 创建可执行文件归档
+          tar -czf dist/alamode-${{ env.VERSION }}-linux-x86_64.tar.gz -C _build alm anphon
+          
+          # 显示归档内容
+          tar -tzf dist/alamode-${{ env.VERSION }}-linux-x86_64.tar.gz
+          ls -la dist/
+      
+      - name: Upload binaries to release
+        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/develop'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: ALAMODE ${{ env.VERSION }} (Ubuntu)
+          body: |
+            ALAMODE ${{ env.VERSION }} 自动构建版本
+            构建系统: Ubuntu Linux
+            构建日期: ${{ env.DATE }}
+            
+            包含组件:
+            - alm: 原子局域振动模式分析器
+            - anphon: 晶格动力学计算程序
+            
+            使用说明:
+            1. 解压: tar -xzf alamode-${{ env.VERSION }}-linux-x86_64.tar.gz
+            2. 将可执行文件添加到 PATH 环境变量
+          files: |
+            dist/alamode-*.tar.gz
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
