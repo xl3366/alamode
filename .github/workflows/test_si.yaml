@@ -1,4 +1,4 @@
-name: Test Si example0
+name: Test Si example0 and Release
 
 on:
   push:
@@ -78,39 +78,67 @@ jobs:
         run: |
           python test_si.py
           
+      - name: Upload build artifacts
+        if: github.event_name == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alamode-build-${{ github.sha }}
+          path: |
+            _build/
+            !_build/CMakeFiles/
+          retention-days: 30
+
   create-release:
+    if: github.event_name == 'release'
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'published'
+    name: Create Release Assets
     
     steps:
-      - uses: actions/checkout@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0
+          name: alamode-build-${{ github.sha }}
+          path: downloaded-artifacts
           
-      - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest
-          python-version: '3.10'
-          
-      - name: Install build tools
+      - name: List downloaded files
+        run: ls -la downloaded-artifacts/
+        
+      - name: Create release assets package
         run: |
-          conda install -y twine build
+          mkdir -p release-assets
+          cp -r downloaded-artifacts/_build/* release-assets/ || true
+          tar -czf alamode-binaries-${{ github.sha }}.tar.gz release-assets/
+          ls -la
           
-      - name: Build package
-        run: |
-          python -m build
-          
-      - name: Upload to PyPI (optional)
+      - name: Upload release assets
+        uses: actions/upload-release-asset@v1
         env:
-          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-        run: |
-          twine upload dist/*
-          
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: dist/*
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./alamode-binaries-${{ github.sha }}.tar.gz
+          asset_name: alamode-binaries-${{ github.sha }}.tar.gz
+          asset_content_type: application/gzip
+
+  auto-release:
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    name: Auto Create Release on Success
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: auto-release-${{ github.sha }}
+          release_name: Auto Release ${{ github.sha }}
+          draft: false
+          prerelease: true
           generate_release_notes: true
