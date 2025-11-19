@@ -4,19 +4,13 @@ on:
   push:
     branches:
       - develop
-    # paths:
-    #   - '**.cpp'
-    #   - '**.h'
-    #   - '**.py'
-    #   - '**.c'
-  
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest]
-#        os: [ubuntu-latest, windows-latest, macOS-latest]
         python-version: ['3.10']
     name: OS ${{ matrix.os }} Python ${{ matrix.python-version }} 
     defaults:
@@ -33,13 +27,12 @@ jobs:
      
       - name: Get Date
         id: get-date
-        run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
+        run: echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
         shell: bash
         
       - name: Cache Conda env
         uses: actions/cache@v4
         env:
-          # Increase this value to reset cache if etc/alm-environment.yml has not changed
           CACHE_NUMBER: 0
         with:
           path: ${{ env.CONDA }}/envs
@@ -47,21 +40,25 @@ jobs:
         id: cache
          
       - name: Update environment
-        run: conda env update -n anaconda-client-env -f etc/alamode-environment.yml
+        run: conda env update -n alamode -f etc/alamode-environment.yml
         if: steps.cache.outputs.cache-hit != 'true'
+        
       - run: |
           conda info
           conda list
           conda config --show-sources
           conda config --show
           printenv | sort
+          
       - name: Install conda libraries
         run: conda install numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
         
       - run: echo ${CC} ${CXX}
 
-      - name: Build alm and anphon with cmake
+      - name: Fix and Build with cmake
         run: |
+          # 临时修复：设置环境变量
+          export CMAKE_POLICY_VERSION_MINIMUM=3.5
           mkdir -p _build
           cd _build
           cmake -DCMAKE_BUILD_TYPE=Release ..
