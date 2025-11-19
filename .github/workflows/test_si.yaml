@@ -4,67 +4,112 @@ on:
   push:
     branches:
       - develop
+  release:
+    types: [published]
+
+env:
+  CONDA_ENV_NAME: alamode
+  CONDA_ENV_FILE: etc/alamode-environment.yml
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest]
         python-version: ['3.10']
-    name: OS ${{ matrix.os }} Python ${{ matrix.python-version }} 
+    name: OS ${{ matrix.os }} Python ${{ matrix.python-version }}
     defaults:
       run:
         shell: bash -l {0}
+    
     steps:
       - uses: actions/checkout@v4
+      
       - name: Setup Miniforge
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
-          activate-environment: alamode
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
           python-version: ${{ matrix.python-version }}
-     
-      - name: Get Date
-        id: get-date
-        run: echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
-        shell: bash
+          auto-activate-base: false
+          
+      - name: Get current date
+        id: date
+        run: echo "date=$(date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
         
-      - name: Cache Conda env
+      - name: Cache conda environment
         uses: actions/cache@v4
-        env:
-          CACHE_NUMBER: 0
         with:
-          path: ${{ env.CONDA }}/envs
-          key: conda-${{ runner.os }}--${{ runner.arch }}--${{ steps.get-date.outputs.today }}-${{ hashFiles('etc/alamode-environment.yml') }}-${{ env.CACHE_NUMBER }}
-        id: cache
-         
+          path: $CONDA/envs
+          key: conda-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.date.outputs.date }}-${{ hashFiles(env.CONDA_ENV_FILE) }}
+          restore-keys: |
+            conda-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.date.outputs.date }}-
+            conda-${{ runner.os }}-${{ matrix.python-version }}-
+            
       - name: Update environment
-        run: conda env update -n alamode -f etc/alamode-environment.yml
-        if: steps.cache.outputs.cache-hit != 'true'
-        
-      - run: |
+        run: |
+          conda env update -n $CONDA_ENV_NAME -f $CONDA_ENV_FILE
+          conda activate $CONDA_ENV_NAME
+          
+      - name: Install required conda packages
+        run: |
+          conda install -y numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
+          
+      - name: Show environment info
+        run: |
           conda info
           conda list
-          conda config --show-sources
           conda config --show
-          printenv | sort
+          which cmake
+          echo "CC: $CC"
+          echo "CXX: $CXX"
           
-      - name: Install conda libraries
-        run: conda install numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
-        
-      - run: echo ${CC} ${CXX}
-
-      - name: Fix and Build with cmake
+      - name: Configure and build with CMake
         run: |
-          # 临时修复：设置环境变量
-          export CMAKE_POLICY_VERSION_MINIMUM=3.5
           mkdir -p _build
           cd _build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j
-          cd ..
-      
-      - name: Run test Si
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_DEFAULT_CMP0091=NEW ..
+          make -j$(nproc)
+          
+      - name: Run Si test
         working-directory: ./test
-        run: python test_si.py
+        run: |
+          python test_si.py
+          
+  create-release:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup Miniforge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          python-version: '3.10'
+          
+      - name: Install build tools
+        run: |
+          conda install -y twine build
+          
+      - name: Build package
+        run: |
+          python -m build
+          
+      - name: Upload to PyPI (optional)
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          twine upload dist/*
+          
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
