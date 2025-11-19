@@ -22,6 +22,11 @@ jobs:
         with:
           fetch-depth: 0
       
+      - name: Setup CMake
+        uses: actions/setup-cmake@v3
+        with:
+          cmake-version: '3.20.0'
+      
       - name: Setup Miniforge
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -61,11 +66,17 @@ jobs:
       - name: Install conda libraries
         run: conda install numpy scipy h5py compilers spglib boost eigen cmake openmpi fftw
       
+      - name: Check CMake version
+        run: |
+          cmake --version
+          which cmake
+      
       - name: Build alm and anphon with cmake
         run: |
           mkdir -p _build
           cd _build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
+          # 使用更新的 CMake 策略版本
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release ..
           make -j
           cd ..
       
