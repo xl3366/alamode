@@ -68,8 +68,8 @@ jobs:
       - name: Configure and build with CMake
         run: |
           export CMAKE_POLICY_VERSION_MINIMUM=3.5
-          mkdir -p _build
-          cd _build
+          mkdir -p build
+          cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_DEFAULT_CMP0091=NEW ..
           make -j$(nproc)
           
@@ -83,9 +83,15 @@ jobs:
           echo "=== Root directory ==="
           ls -la
           echo "=== Build directory ==="
-          ls -la _build/
+          ls -la build/
           echo "=== Test directory ==="
           ls -la test/
+          
+      - name: Compress build directory
+        if: github.event_name == 'release'
+        run: |
+          tar -czf build-${{ github.sha }}.tar.gz build/
+          ls -la *.tar.gz
           
       - name: Upload build artifacts
         if: github.event_name == 'release'
@@ -93,7 +99,7 @@ jobs:
         with:
           name: alamode-build-${{ github.sha }}
           path: |
-            _build/
+            build-${{ github.sha }}.tar.gz
             test/
           retention-days: 30
 
@@ -114,9 +120,12 @@ jobs:
           
       - name: Create release assets package
         run: |
-          # 重命名目录以避免路径混乱
-          mv _build alamode-build
+          # 解压构建目录
+          tar -xzf build-${{ github.sha }}.tar.gz
+          # 重命名目录
+          mv build alamode-build
           mv test alamode-test
+          # 重新打包为发布资源
           tar -czf alamode-binaries-${{ github.sha }}.tar.gz alamode-build/ alamode-test/
           ls -la
           
