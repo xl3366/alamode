@@ -67,6 +67,7 @@ jobs:
           
       - name: Configure and build with CMake
         run: |
+          export CMAKE_POLICY_VERSION_MINIMUM=3.5
           mkdir -p _build
           cd _build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_DEFAULT_CMP0091=NEW ..
