@@ -58,7 +58,7 @@ jobs:
       - name: Fix and Build with cmake
         run: |
           # 临时修复：设置环境变量
-          #export CMAKE_POLICY_VERSION_MINIMUM=3.5
+          export CMAKE_POLICY_VERSION_MINIMUM=3.5
           mkdir -p _build
           cd _build
           cmake -DCMAKE_BUILD_TYPE=Release ..
